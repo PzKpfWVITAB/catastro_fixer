@@ -27,6 +27,7 @@ namespace CatastroFixer
         private Button _btnConfig;
 
         // Panel izquierdo (Selección de PDFs)
+        private SplitContainer _splitMain;
         private Button _btnToggleSelectAll;
         private TextBox _txtFilter;
         private Label _lblSelectionCount;
@@ -157,15 +158,13 @@ namespace CatastroFixer
             bottomPanel.Controls.Add(_lblStatus);
 
             // 3. SplitContainer central (Izquierda: PDFs con checkboxes | Derecha: Resultados)
-            var split = new SplitContainer
+            _splitMain = new SplitContainer
             {
                 Dock = DockStyle.Fill,
-                SplitterDistance = 360,
-                Panel1MinSize = 260,
-                Panel2MinSize = 520,
                 BackColor = Color.FromArgb(226, 232, 240),
                 SplitterWidth = 5
             };
+            var split = _splitMain;
 
             // Panel Izquierdo
             var leftContainer = new Panel { Dock = DockStyle.Fill, Padding = new Padding(10), BackColor = Color.White };
@@ -325,6 +324,17 @@ namespace CatastroFixer
 
         private async void MainForm_Load(object sender, EventArgs e)
         {
+            try
+            {
+                if (_splitMain != null && _splitMain.Width > 780)
+                {
+                    _splitMain.Panel1MinSize = 260;
+                    _splitMain.Panel2MinSize = 480;
+                    _splitMain.SplitterDistance = 360;
+                }
+            }
+            catch { }
+
             _config = EnvConfig.Load();
             _txtFolder.Text = _config.DefaultPdfDir;
 
@@ -793,11 +803,21 @@ namespace CatastroFixer
 
                 try
                 {
+                    // Respetar el separador de listas de Windows (',' en es-MX, ';' en es-ES) para que Excel separe columnas directo
+                    string sep = System.Globalization.CultureInfo.CurrentCulture.TextInfo.ListSeparator;
+                    if (sep != "," && sep != ";") sep = ",";
+
                     var sb = new StringBuilder();
-                    sb.AppendLine("Archivo,Municipio,ClaveMuni,MunicipioId,Localidad,IdLocalidad,ClaveLoc,UbicacionExtraida,Estado,Evidencia,Ruta");
+                    sb.Append(string.Join(sep, new[]
+                    {
+                        "Archivo", "Municipio", "ClaveMuni", "MunicipioId",
+                        "Localidad", "IdLocalidad", "ClaveLoc", "UbicacionExtraida",
+                        "Estado", "Evidencia", "Ruta"
+                    })).Append("\r\n");
+
                     foreach (var r in _results)
                     {
-                        sb.AppendLine(string.Join(",",
+                        sb.Append(string.Join(sep,
                             Csv(r.FileName),
                             Csv(r.MunicipioNombre),
                             Csv(r.MunicipioClave),
@@ -808,11 +828,12 @@ namespace CatastroFixer
                             Csv(r.UbicacionExtraida),
                             Csv(r.Estado),
                             Csv(r.Evidencia),
-                            Csv(r.FilePath)));
+                            Csv(r.FilePath))).Append("\r\n");
                     }
 
-                    File.WriteAllText(dlg.FileName, sb.ToString(), new UTF8Encoding(true));
-                    MessageBox.Show($"CSV exportado correctamente ({_results.Count} filas):\n{dlg.FileName}", "Exportado", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    // UTF-8 con BOM (EF BB BF): garantiza que Excel abra tildes, ñ y rutas intactas al doble clic
+                    File.WriteAllText(dlg.FileName, sb.ToString(), new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
+                    MessageBox.Show($"CSV exportado correctamente en UTF-8 con BOM ({_results.Count} filas):\n{dlg.FileName}", "Exportado", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 }
                 catch (Exception ex)
                 {
@@ -824,7 +845,8 @@ namespace CatastroFixer
         private static string Csv(string val)
         {
             if (string.IsNullOrEmpty(val)) return "\"\"";
-            return "\"" + val.Replace("\"", "\"\"").Replace("\r", " ").Replace("\n", " ") + "\"";
+            string normalized = val.Normalize(NormalizationForm.FormC);
+            return "\"" + normalized.Replace("\"", "\"\"").Replace("\r", " ").Replace("\n", " ") + "\"";
         }
 
         private void Log(string msg)
