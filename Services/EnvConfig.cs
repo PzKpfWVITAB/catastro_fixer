@@ -20,7 +20,7 @@ namespace CatastroFixer.Services
 
         public int MaxConcurrency { get; set; } = 4;
         public int MaxPages { get; set; } = 3;
-        public string DefaultPdfDir { get; set; } = @"\\172.40.5.84\ssdirec\REVISANDO CATASTRO\ENTREGA 3\2DA PARTE\CATASTRO SIN CLAVE\001";
+        public string DefaultPdfDir { get; set; } = @"\\172.40.5.84\ssdirec\REVISANDO CATASTRO\ENTREGA 3\2DA PARTE\CATASTRO SIN CLAVE";
         public string DestinoBaseDir { get; set; } = "";
 
         public string BuildConnectionString()

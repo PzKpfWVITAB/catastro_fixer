@@ -26,15 +26,17 @@ namespace CatastroFixer
         private Button _btnLoadPdfs;
         private Button _btnConfig;
 
-        // Panel izquierdo (Selección de PDFs)
+        // Panel izquierdo (Árbol de carpetas y PDFs)
         private SplitContainer _splitMain;
         private Button _btnToggleSelectAll;
+        private Button _btnToggleExpand;
         private TextBox _txtFilter;
         private Label _lblSelectionCount;
-        private CheckedListBox _chkListPdfs;
+        private TreeView _treePdfs;
         private readonly List<string> _allPdfPaths = new List<string>();
         private readonly HashSet<string> _checkedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        private bool _suppressItemCheck;
+        private bool _suppressTreeCheck;
+        private bool _isTreeExpanded;
 
         // Panel derecho (Resultados)
         private Button _btnRun;
@@ -59,13 +61,6 @@ namespace CatastroFixer
         private int _consecutiveClaudeFailures;
         private const int CLAUDE_CIRCUIT_BREAKER_THRESHOLD = 3;
         private long _totalCacheHits;
-
-        private class PdfListItem
-        {
-            public string FullPath { get; set; }
-            public string DisplayName { get; set; }
-            public override string ToString() => DisplayName;
-        }
 
         public MainForm()
         {
@@ -95,7 +90,7 @@ namespace CatastroFixer
             var lblDir = new Label { Text = "Carpeta PDFs:", AutoSize = true, Left = 12, Top = 18, Font = new Font("Segoe UI", 9.5f, FontStyle.Bold) };
             _txtFolder = new TextBox { Left = 112, Top = 14, Width = 540, Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right };
             _btnBrowse = new Button { Text = "Explorar...", Left = 660, Top = 13, Width = 88, Height = 28, Anchor = AnchorStyles.Top | AnchorStyles.Right, FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(241, 245, 249) };
-            _chkSubfolders = new CheckBox { Text = "Subcarpetas", Left = 758, Top = 17, Width = 104, Anchor = AnchorStyles.Top | AnchorStyles.Right };
+            _chkSubfolders = new CheckBox { Text = "Subcarpetas", Left = 758, Top = 17, Width = 104, Checked = true, Anchor = AnchorStyles.Top | AnchorStyles.Right };
             _btnLoadPdfs = new Button { Text = "Cargar PDFs", Left = 868, Top = 12, Width = 112, Height = 30, Anchor = AnchorStyles.Top | AnchorStyles.Right, FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(37, 99, 235), ForeColor = Color.White, Font = new Font("Segoe UI", 9f, FontStyle.Bold) };
             _btnLoadPdfs.FlatAppearance.BorderSize = 0;
 
@@ -166,33 +161,48 @@ namespace CatastroFixer
             };
             var split = _splitMain;
 
-            // Panel Izquierdo
+            // Panel Izquierdo (Árbol limpio de directorios y PDFs)
             var leftContainer = new Panel { Dock = DockStyle.Fill, Padding = new Padding(10), BackColor = Color.White };
 
-            var leftHeader = new Panel { Dock = DockStyle.Top, Height = 88 };
-            var lblLeftTitle = new Label { Text = "PDFs Disponibles (clic para marcar)", Left = 0, Top = 0, Width = 320, Font = new Font("Segoe UI", 9.5f, FontStyle.Bold), ForeColor = Color.FromArgb(30, 58, 138) };
+            var leftHeader = new Panel { Dock = DockStyle.Top, Height = 106 };
+            var lblLeftTitle = new Label { Text = "Árbol de Directorios y PDFs", Left = 0, Top = 0, Width = 320, Font = new Font("Segoe UI", 9.5f, FontStyle.Bold), ForeColor = Color.FromArgb(30, 58, 138) };
 
             _btnToggleSelectAll = new Button
             {
                 Text = "Seleccionar todos",
                 Left = 0,
                 Top = 24,
-                Width = 175,
+                Width = 155,
                 Height = 28,
                 FlatStyle = FlatStyle.Flat,
                 BackColor = Color.FromArgb(224, 231, 255),
                 ForeColor = Color.FromArgb(30, 58, 138),
-                Font = new Font("Segoe UI", 9f, FontStyle.Bold)
+                Font = new Font("Segoe UI", 8.8f, FontStyle.Bold)
             };
             _btnToggleSelectAll.FlatAppearance.BorderSize = 0;
             _btnToggleSelectAll.Click += BtnToggleSelectAll_Click;
 
+            _btnToggleExpand = new Button
+            {
+                Text = "Expandir todo",
+                Left = 161,
+                Top = 24,
+                Width = 108,
+                Height = 28,
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(241, 245, 249),
+                ForeColor = Color.FromArgb(51, 65, 85),
+                Font = new Font("Segoe UI", 8.5f)
+            };
+            _btnToggleExpand.FlatAppearance.BorderSize = 0;
+            _btnToggleExpand.Click += BtnToggleExpand_Click;
+
             _lblSelectionCount = new Label
             {
                 Text = "Seleccionados: 0 / 0",
-                Left = 182,
-                Top = 29,
-                Width = 160,
+                Left = 0,
+                Top = 56,
+                Width = 320,
                 ForeColor = Color.FromArgb(71, 85, 105),
                 Font = new Font("Segoe UI", 8.5f, FontStyle.Bold)
             };
@@ -200,38 +210,45 @@ namespace CatastroFixer
             _txtFilter = new TextBox
             {
                 Left = 0,
-                Top = 58,
+                Top = 76,
                 Width = 330,
                 Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right
             };
-            // Placeholder visual simple
-            var lblFilterHint = new Label { Text = "Filtrar por nombre...", Left = 6, Top = 61, AutoSize = true, ForeColor = Color.Gray, BackColor = Color.White };
+            var lblFilterHint = new Label { Text = "Filtrar por carpeta o archivo...", Left = 6, Top = 79, AutoSize = true, ForeColor = Color.Gray, BackColor = Color.White };
             lblFilterHint.Click += (s, e) => _txtFilter.Focus();
             _txtFilter.TextChanged += (s, e) =>
             {
                 lblFilterHint.Visible = string.IsNullOrEmpty(_txtFilter.Text);
-                RefreshPdfListBox();
+                RefreshPdfTreeView();
             };
 
-            leftHeader.Controls.AddRange(new Control[] { lblLeftTitle, _btnToggleSelectAll, _lblSelectionCount, lblFilterHint, _txtFilter });
+            leftHeader.Controls.AddRange(new Control[] { lblLeftTitle, _btnToggleSelectAll, _btnToggleExpand, _lblSelectionCount, lblFilterHint, _txtFilter });
             lblFilterHint.BringToFront();
             leftHeader.Resize += (s, e) => _txtFilter.Width = Math.Max(120, leftHeader.ClientSize.Width);
 
-            _chkListPdfs = new CheckedListBox
+            _treePdfs = new TreeView
             {
                 Dock = DockStyle.Fill,
-                CheckOnClick = true,
-                IntegralHeight = false,
+                CheckBoxes = true,
+                ShowLines = true,
+                ShowPlusMinus = true,
+                ShowRootLines = true,
+                FullRowSelect = false,
+                HideSelection = false,
                 BorderStyle = BorderStyle.FixedSingle,
-                Font = new Font("Segoe UI", 9f)
+                Font = new Font("Segoe UI", 9f),
+                ItemHeight = 22
             };
-            _chkListPdfs.ItemCheck += ChkListPdfs_ItemCheck;
-            _chkListPdfs.DoubleClick += (s, e) =>
+            _treePdfs.AfterCheck += TreePdfs_AfterCheck;
+            _treePdfs.NodeMouseDoubleClick += (s, e) =>
             {
-                if (_chkListPdfs.SelectedItem is PdfListItem item) OpenPdfExternally(item.FullPath);
+                if (e.Node?.Tag is string pdfPath && File.Exists(pdfPath))
+                {
+                    OpenPdfExternally(pdfPath);
+                }
             };
 
-            leftContainer.Controls.Add(_chkListPdfs);
+            leftContainer.Controls.Add(_treePdfs);
             leftContainer.Controls.Add(leftHeader);
             split.Panel1.Controls.Add(leftContainer);
 
@@ -346,7 +363,7 @@ namespace CatastroFixer
 
             if (!string.IsNullOrWhiteSpace(_txtFolder.Text) && Directory.Exists(_txtFolder.Text))
             {
-                LoadPdfsFromFolder(_txtFolder.Text);
+                await LoadPdfsFromFolderAsync(_txtFolder.Text);
             }
         }
 
@@ -365,23 +382,23 @@ namespace CatastroFixer
             }
         }
 
-        private void BtnBrowse_Click(object sender, EventArgs e)
+        private async void BtnBrowse_Click(object sender, EventArgs e)
         {
             using (var dlg = new FolderBrowserDialog())
             {
-                dlg.Description = "Seleccione la carpeta que contiene los archivos PDF";
+                dlg.Description = "Seleccione la carpeta raíz que contiene las subcarpetas y archivos PDF";
                 if (!string.IsNullOrWhiteSpace(_txtFolder.Text) && Directory.Exists(_txtFolder.Text))
                     dlg.SelectedPath = _txtFolder.Text;
 
                 if (dlg.ShowDialog(this) == DialogResult.OK)
                 {
                     _txtFolder.Text = dlg.SelectedPath;
-                    LoadPdfsFromFolder(dlg.SelectedPath);
+                    await LoadPdfsFromFolderAsync(dlg.SelectedPath);
                 }
             }
         }
 
-        private void BtnLoadPdfs_Click(object sender, EventArgs e)
+        private async void BtnLoadPdfs_Click(object sender, EventArgs e)
         {
             string dir = _txtFolder.Text.Trim();
             if (string.IsNullOrWhiteSpace(dir) || !Directory.Exists(dir))
@@ -389,25 +406,34 @@ namespace CatastroFixer
                 MessageBox.Show($"La carpeta no existe o no es accesible:\n{dir}", "Carpeta inválida", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
-            LoadPdfsFromFolder(dir);
+            await LoadPdfsFromFolderAsync(dir);
         }
 
-        private void LoadPdfsFromFolder(string folder)
+        private async Task LoadPdfsFromFolderAsync(string folder)
         {
             try
             {
                 Cursor = Cursors.WaitCursor;
-                var opt = _chkSubfolders.Checked ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly;
-                var files = Directory.GetFiles(folder, "*.pdf", opt)
-                    .OrderBy(f => f, StringComparer.OrdinalIgnoreCase)
-                    .ToList();
+                _btnLoadPdfs.Enabled = false;
+                _btnBrowse.Enabled = false;
+                _lblStatus.Text = $"Escaneando PDFs en '{folder}'...";
+
+                bool includeSubs = _chkSubfolders.Checked;
+                var files = await Task.Run(() =>
+                {
+                    var opt = includeSubs ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly;
+                    return Directory.GetFiles(folder, "*.pdf", opt)
+                        .OrderBy(f => f, StringComparer.OrdinalIgnoreCase)
+                        .ToList();
+                });
 
                 _allPdfPaths.Clear();
                 _allPdfPaths.AddRange(files);
                 _checkedPaths.Clear();
 
-                RefreshPdfListBox();
+                RefreshPdfTreeView();
                 Log($"[Carpeta] Cargados {_allPdfPaths.Count} PDF(s) desde: {folder}");
+                _lblStatus.Text = $"Listo | {_allPdfPaths.Count} PDF(s) cargados | stellumdb: {_catalogs.Municipios.Count} munis / {_catalogs.Localidades.Count} locs";
             }
             catch (Exception ex)
             {
@@ -416,89 +442,256 @@ namespace CatastroFixer
             finally
             {
                 Cursor = Cursors.Default;
+                if (!_isRunning)
+                {
+                    _btnLoadPdfs.Enabled = true;
+                    _btnBrowse.Enabled = true;
+                }
             }
         }
 
-        private void RefreshPdfListBox()
+        private void RefreshPdfTreeView()
         {
             string filter = (_txtFilter.Text ?? "").Trim();
             string baseDir = (_txtFolder.Text ?? "").Trim().TrimEnd('\\', '/');
 
-            _suppressItemCheck = true;
-            _chkListPdfs.BeginUpdate();
-            _chkListPdfs.Items.Clear();
+            _suppressTreeCheck = true;
+            _treePdfs.BeginUpdate();
+            _treePdfs.Nodes.Clear();
 
+            var filtered = new List<string>();
             foreach (var path in _allPdfPaths)
             {
-                string display = path;
-                if (!string.IsNullOrEmpty(baseDir) && path.StartsWith(baseDir, StringComparison.OrdinalIgnoreCase))
+                string rel = (!string.IsNullOrEmpty(baseDir) && path.StartsWith(baseDir, StringComparison.OrdinalIgnoreCase))
+                    ? path.Substring(baseDir.Length).TrimStart('\\', '/')
+                    : Path.GetFileName(path);
+
+                if (string.IsNullOrEmpty(filter) || rel.IndexOf(filter, StringComparison.OrdinalIgnoreCase) >= 0)
                 {
-                    display = path.Substring(baseDir.Length).TrimStart('\\', '/');
+                    filtered.Add(path);
+                }
+            }
+
+            if (filtered.Count > 0)
+            {
+                string rootLabel = Path.GetFileName(baseDir);
+                if (string.IsNullOrEmpty(rootLabel)) rootLabel = baseDir;
+
+                var rootNode = new TreeNode($"📁 {rootLabel} ({filtered.Count} PDFs)")
+                {
+                    ForeColor = Color.FromArgb(30, 58, 138),
+                    NodeFont = new Font(_treePdfs.Font, FontStyle.Bold)
+                };
+
+                var folderMap = new Dictionary<string, TreeNode>(StringComparer.OrdinalIgnoreCase);
+                var folderCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+
+                foreach (var fullPath in filtered)
+                {
+                    string rel = (!string.IsNullOrEmpty(baseDir) && fullPath.StartsWith(baseDir, StringComparison.OrdinalIgnoreCase))
+                        ? fullPath.Substring(baseDir.Length).TrimStart('\\', '/')
+                        : Path.GetFileName(fullPath);
+
+                    string[] segments = rel.Split(new[] { '\\', '/' }, StringSplitOptions.RemoveEmptyEntries);
+                    TreeNode parent = rootNode;
+                    string accKey = "";
+
+                    // Crear nodos de carpetas intermedias
+                    for (int i = 0; i < segments.Length - 1; i++)
+                    {
+                        accKey = string.IsNullOrEmpty(accKey) ? segments[i] : accKey + "\\" + segments[i];
+                        if (!folderMap.TryGetValue(accKey, out TreeNode dirNode))
+                        {
+                            dirNode = new TreeNode($"📁 {segments[i]}")
+                            {
+                                ForeColor = Color.FromArgb(51, 65, 85),
+                                NodeFont = new Font(_treePdfs.Font, FontStyle.Bold)
+                            };
+                            folderMap[accKey] = dirNode;
+                            folderCounts[accKey] = 0;
+                            parent.Nodes.Add(dirNode);
+                        }
+                        folderCounts[accKey]++;
+                        parent = dirNode;
+                    }
+
+                    // Nodo hoja (PDF seleccionable individualmente)
+                    string fileName = segments.Length > 0 ? segments[segments.Length - 1] : Path.GetFileName(fullPath);
+                    var fileNode = new TreeNode($"📄 {fileName}")
+                    {
+                        Tag = fullPath,
+                        Checked = _checkedPaths.Contains(fullPath),
+                        ForeColor = Color.FromArgb(15, 23, 42)
+                    };
+                    parent.Nodes.Add(fileNode);
+                }
+
+                // Mostrar conteo limpio de PDFs en cada carpeta
+                foreach (var kv in folderMap)
+                {
+                    string folderName = Path.GetFileName(kv.Key);
+                    int count = folderCounts[kv.Key];
+                    kv.Value.Text = $"📁 {folderName} ({count})";
+                }
+
+                // Sincronizar checks de carpetas según hijos marcados
+                SyncFolderChecksRecursive(rootNode);
+
+                _treePdfs.Nodes.Add(rootNode);
+                rootNode.Expand();
+
+                // Si hay filtro activo o solo 1 carpeta, expandir todo para ver los PDFs al instante
+                if (!string.IsNullOrEmpty(filter) || folderMap.Count <= 1)
+                {
+                    rootNode.ExpandAll();
+                    _isTreeExpanded = true;
                 }
                 else
                 {
-                    display = Path.GetFileName(path);
-                }
-
-                if (!string.IsNullOrEmpty(filter) &&
-                    display.IndexOf(filter, StringComparison.OrdinalIgnoreCase) < 0)
-                {
-                    continue;
-                }
-
-                int idx = _chkListPdfs.Items.Add(new PdfListItem { FullPath = path, DisplayName = display });
-                if (_checkedPaths.Contains(path))
-                {
-                    _chkListPdfs.SetItemChecked(idx, true);
+                    _isTreeExpanded = false;
                 }
             }
 
-            _chkListPdfs.EndUpdate();
-            _suppressItemCheck = false;
+            _treePdfs.EndUpdate();
+            _suppressTreeCheck = false;
+            _btnToggleExpand.Text = _isTreeExpanded ? "Contraer todo" : "Expandir todo";
             UpdateSelectionCounterAndToggleButton();
         }
 
-        private void ChkListPdfs_ItemCheck(object sender, ItemCheckEventArgs e)
+        private bool SyncFolderChecksRecursive(TreeNode node)
         {
-            if (_suppressItemCheck) return;
-            if (_chkListPdfs.Items[e.Index] is PdfListItem item)
+            if (node.Tag is string)
             {
-                if (e.NewValue == CheckState.Checked) _checkedPaths.Add(item.FullPath);
-                else _checkedPaths.Remove(item.FullPath);
+                return node.Checked;
             }
-            BeginInvoke(new Action(UpdateSelectionCounterAndToggleButton));
+
+            bool allChecked = node.Nodes.Count > 0;
+            foreach (TreeNode child in node.Nodes)
+            {
+                if (!SyncFolderChecksRecursive(child)) allChecked = false;
+            }
+            node.Checked = allChecked;
+            return allChecked;
+        }
+
+        private void TreePdfs_AfterCheck(object sender, TreeViewEventArgs e)
+        {
+            if (_suppressTreeCheck || e.Node == null) return;
+
+            _suppressTreeCheck = true;
+            try
+            {
+                // Si es carpeta, propagar check a todos sus hijos
+                if (!(e.Node.Tag is string))
+                {
+                    SetNodeAndChildrenChecked(e.Node, e.Node.Checked);
+                }
+                else
+                {
+                    string pdfPath = (string)e.Node.Tag;
+                    if (e.Node.Checked) _checkedPaths.Add(pdfPath);
+                    else _checkedPaths.Remove(pdfPath);
+                }
+
+                // Actualizar estado de los ancestros (carpeta marcada si todos sus hijos lo están)
+                UpdateParentCheckState(e.Node.Parent);
+            }
+            finally
+            {
+                _suppressTreeCheck = false;
+            }
+
+            UpdateSelectionCounterAndToggleButton();
+        }
+
+        private void SetNodeAndChildrenChecked(TreeNode node, bool isChecked)
+        {
+            node.Checked = isChecked;
+            if (node.Tag is string pdfPath)
+            {
+                if (isChecked) _checkedPaths.Add(pdfPath);
+                else _checkedPaths.Remove(pdfPath);
+            }
+
+            foreach (TreeNode child in node.Nodes)
+            {
+                SetNodeAndChildrenChecked(child, isChecked);
+            }
+        }
+
+        private void UpdateParentCheckState(TreeNode parent)
+        {
+            while (parent != null)
+            {
+                bool allChecked = parent.Nodes.Count > 0;
+                foreach (TreeNode child in parent.Nodes)
+                {
+                    if (!child.Checked)
+                    {
+                        allChecked = false;
+                        break;
+                    }
+                }
+                parent.Checked = allChecked;
+                parent = parent.Parent;
+            }
         }
 
         private void BtnToggleSelectAll_Click(object sender, EventArgs e)
         {
-            if (_chkListPdfs.Items.Count == 0) return;
+            if (_treePdfs.Nodes.Count == 0) return;
 
-            bool allVisibleChecked = AreAllVisibleChecked();
-            bool targetCheck = !allVisibleChecked;
+            bool targetCheck = !AreAllVisibleChecked();
 
-            _suppressItemCheck = true;
-            _chkListPdfs.BeginUpdate();
-            for (int i = 0; i < _chkListPdfs.Items.Count; i++)
+            _suppressTreeCheck = true;
+            _treePdfs.BeginUpdate();
+            foreach (TreeNode root in _treePdfs.Nodes)
             {
-                _chkListPdfs.SetItemChecked(i, targetCheck);
-                if (_chkListPdfs.Items[i] is PdfListItem item)
-                {
-                    if (targetCheck) _checkedPaths.Add(item.FullPath);
-                    else _checkedPaths.Remove(item.FullPath);
-                }
+                SetNodeAndChildrenChecked(root, targetCheck);
             }
-            _chkListPdfs.EndUpdate();
-            _suppressItemCheck = false;
+            _treePdfs.EndUpdate();
+            _suppressTreeCheck = false;
 
             UpdateSelectionCounterAndToggleButton();
         }
 
+        private void BtnToggleExpand_Click(object sender, EventArgs e)
+        {
+            if (_treePdfs.Nodes.Count == 0) return;
+
+            _treePdfs.BeginUpdate();
+            if (_isTreeExpanded)
+            {
+                _treePdfs.CollapseAll();
+                if (_treePdfs.Nodes.Count > 0) _treePdfs.Nodes[0].Expand();
+                _isTreeExpanded = false;
+            }
+            else
+            {
+                _treePdfs.ExpandAll();
+                _isTreeExpanded = true;
+            }
+            _treePdfs.EndUpdate();
+            _btnToggleExpand.Text = _isTreeExpanded ? "Contraer todo" : "Expandir todo";
+        }
+
         private bool AreAllVisibleChecked()
         {
-            if (_chkListPdfs.Items.Count == 0) return false;
-            for (int i = 0; i < _chkListPdfs.Items.Count; i++)
+            if (_treePdfs.Nodes.Count == 0) return false;
+            foreach (TreeNode root in _treePdfs.Nodes)
             {
-                if (!_chkListPdfs.GetItemChecked(i)) return false;
+                if (!AreAllLeavesChecked(root)) return false;
+            }
+            return true;
+        }
+
+        private bool AreAllLeavesChecked(TreeNode node)
+        {
+            if (node.Tag is string) return node.Checked;
+            if (node.Nodes.Count == 0) return false;
+            foreach (TreeNode child in node.Nodes)
+            {
+                if (!AreAllLeavesChecked(child)) return false;
             }
             return true;
         }
@@ -733,8 +926,9 @@ namespace CatastroFixer
             _btnLoadPdfs.Enabled = !running;
             _btnBrowse.Enabled = !running;
             _btnConfig.Enabled = !running;
-            _chkListPdfs.Enabled = !running;
+            _treePdfs.Enabled = !running;
             _btnToggleSelectAll.Enabled = !running;
+            _btnToggleExpand.Enabled = !running;
             _btnPause.Enabled = running;
             _btnCancel.Enabled = running;
             _btnPause.Text = "⏸ Pausar";
