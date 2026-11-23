@@ -181,12 +181,94 @@ namespace CatastroFixer.Services
             return report.ToString().Trim();
         }
 
+        public static string ComputePathHash(string filePath)
+        {
+            if (string.IsNullOrWhiteSpace(filePath)) return "";
+            string normPath = filePath.Trim().Normalize(NormalizationForm.FormC);
+            return ComputeSha256Hex(normPath.ToLowerInvariant());
+        }
+
+        public static async Task<Dictionary<string, DetectionResult>> LoadExistingResultsMapAsync(EnvConfig config, CancellationToken ct = default)
+        {
+            var map = new Dictionary<string, DetectionResult>(StringComparer.OrdinalIgnoreCase);
+
+            using (var conn = new MySqlConnection(config.BuildConnectionString()))
+            {
+                await conn.OpenAsync(ct);
+
+                if (!await TableExistsAsync(conn, config.DbDatabase, ResultsTableName, ct))
+                {
+                    return map;
+                }
+
+                string sql = $@"
+SELECT
+    ubicacion_original_hash,
+    nombre_archivo_original,
+    ubicacion_original,
+    carpeta_municipio_original,
+    nombre_propuesto,
+    destino_propuesto,
+    municipio_id,
+    municipio_clave,
+    municipio_nombre,
+    localidad_id,
+    localidad_clave,
+    localidad_nombre,
+    ubicacion_extraida,
+    evidencia,
+    estado,
+    es_fallback_municipio,
+    es_fallback_localidad,
+    modelo_claude,
+    paginas_escaneadas,
+    latencia_ms
+FROM `{ResultsTableName}`
+WHERE estado <> 'Error' AND estado <> 'Error API Claude';";
+
+                using (var cmd = new MySqlCommand(sql, conn))
+                using (var reader = await cmd.ExecuteReaderAsync(ct))
+                {
+                    while (await reader.ReadAsync(ct))
+                    {
+                        string hash = reader.IsDBNull(0) ? "" : reader.GetString(0);
+                        if (string.IsNullOrEmpty(hash)) continue;
+
+                        map[hash] = new DetectionResult
+                        {
+                            FileName = reader.IsDBNull(1) ? "" : reader.GetString(1),
+                            FilePath = reader.IsDBNull(2) ? "" : reader.GetString(2),
+                            CarpetaMunicipioOriginal = reader.IsDBNull(3) ? null : reader.GetString(3),
+                            NombrePropuesto = reader.IsDBNull(4) ? null : reader.GetString(4),
+                            DestinoPropuesto = reader.IsDBNull(5) ? null : reader.GetString(5),
+                            MunicipioId = reader.IsDBNull(6) ? (long?)null : reader.GetInt64(6),
+                            MunicipioClave = reader.IsDBNull(7) ? null : reader.GetString(7),
+                            MunicipioNombre = reader.IsDBNull(8) ? null : reader.GetString(8),
+                            LocalidadId = reader.IsDBNull(9) ? (long?)null : reader.GetInt64(9),
+                            LocalidadClave = reader.IsDBNull(10) ? null : reader.GetString(10),
+                            LocalidadNombre = reader.IsDBNull(11) ? null : reader.GetString(11),
+                            UbicacionExtraida = reader.IsDBNull(12) ? null : reader.GetString(12),
+                            Evidencia = reader.IsDBNull(13) ? null : reader.GetString(13),
+                            Estado = reader.IsDBNull(14) ? "Detectado" : reader.GetString(14),
+                            IsMunicipioFallback = !reader.IsDBNull(15) && reader.GetBoolean(15),
+                            IsLocalidadFallback = !reader.IsDBNull(16) && reader.GetBoolean(16),
+                            ModeloClaude = reader.IsDBNull(17) ? null : reader.GetString(17),
+                            PagesScanned = reader.IsDBNull(18) ? 0 : reader.GetInt32(18),
+                            ElapsedMs = reader.IsDBNull(19) ? 0 : reader.GetInt64(19)
+                        };
+                    }
+                }
+            }
+
+            return map;
+        }
+
         public static async Task UpsertResultAsync(EnvConfig config, DetectionResult r, CancellationToken ct = default)
         {
             if (r == null || string.IsNullOrWhiteSpace(r.FilePath)) return;
 
             string normPath = r.FilePath.Trim().Normalize(NormalizationForm.FormC);
-            string hash = ComputeSha256Hex(normPath.ToLowerInvariant());
+            string hash = ComputePathHash(normPath);
 
             string sql = $@"
 INSERT INTO `{ResultsTableName}` (

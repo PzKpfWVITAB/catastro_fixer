@@ -44,6 +44,7 @@ namespace CatastroFixer
         private Button _btnCancel;
         private Button _btnClearResults;
         private Button _btnExportCsv;
+        private CheckBox _chkSkipProcessedDb;
         private DataGridView _dgvResults;
         private readonly List<DetectionResult> _results = new List<DetectionResult>();
 
@@ -278,11 +279,21 @@ namespace CatastroFixer
             _btnClearResults = new Button { Text = "Limpiar Tabla", Width = 110, Height = 32, FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(241, 245, 249), Margin = new Padding(0, 2, 8, 2) };
             _btnClearResults.Click += (s, e) => { _results.Clear(); _dgvResults.Rows.Clear(); };
 
-            _btnExportCsv = new Button { Text = "Exportar CSV", Width = 115, Height = 32, FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(14, 116, 144), ForeColor = Color.White, Font = new Font("Segoe UI", 9f, FontStyle.Bold), Margin = new Padding(0, 2, 0, 2) };
+            _btnExportCsv = new Button { Text = "Exportar CSV", Width = 115, Height = 32, FlatStyle = FlatStyle.Flat, BackColor = Color.FromArgb(14, 116, 144), ForeColor = Color.White, Font = new Font("Segoe UI", 9f, FontStyle.Bold), Margin = new Padding(0, 2, 12, 2) };
             _btnExportCsv.FlatAppearance.BorderSize = 0;
             _btnExportCsv.Click += BtnExportCsv_Click;
 
-            actionPanel.Controls.AddRange(new Control[] { _btnRun, _btnPause, _btnCancel, _btnClearResults, _btnExportCsv });
+            _chkSkipProcessedDb = new CheckBox
+            {
+                Text = "Omitir ya procesados en BD",
+                Checked = true,
+                AutoSize = true,
+                Font = new Font("Segoe UI", 9f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(30, 58, 138),
+                Margin = new Padding(4, 8, 0, 2)
+            };
+
+            actionPanel.Controls.AddRange(new Control[] { _btnRun, _btnPause, _btnCancel, _btnClearResults, _btnExportCsv, _chkSkipProcessedDb });
 
             _dgvResults = new DataGridView
             {
@@ -741,6 +752,68 @@ namespace CatastroFixer
                 return;
             }
 
+            var pending = selected;
+            if (_chkSkipProcessedDb.Checked)
+            {
+                try
+                {
+                    _lblStatus.Text = "Consultando registros ya procesados en MySQL (catastro_fixer_resultados)...";
+                    var existingMap = await DatabaseSchemaManager.LoadExistingResultsMapAsync(_config);
+                    if (existingMap.Count > 0)
+                    {
+                        var alreadyInGrid = new HashSet<string>(
+                            _results.Where(r => !string.IsNullOrEmpty(r.FilePath)).Select(r => DatabaseSchemaManager.ComputePathHash(r.FilePath)),
+                            StringComparer.OrdinalIgnoreCase);
+
+                        var filteredPending = new List<string>();
+                        int skippedCount = 0;
+                        int loadedFromDbCount = 0;
+
+                        foreach (var path in selected)
+                        {
+                            string hash = DatabaseSchemaManager.ComputePathHash(path);
+                            if (existingMap.TryGetValue(hash, out var existingRes))
+                            {
+                                skippedCount++;
+                                if (!alreadyInGrid.Contains(hash))
+                                {
+                                    AddResultRowImmediate(existingRes);
+                                    alreadyInGrid.Add(hash);
+                                    loadedFromDbCount++;
+                                }
+                            }
+                            else
+                            {
+                                filteredPending.Add(path);
+                            }
+                        }
+
+                        pending = filteredPending;
+                        if (skippedCount > 0)
+                        {
+                            Log($"[BD] Omitidos {skippedCount} PDF(s) ya guardados en {DatabaseSchemaManager.ResultsTableName} ({loadedFromDbCount} cargados a la tabla). Pendientes por analizar con Claude: {pending.Count}.");
+                        }
+
+                        if (pending.Count == 0)
+                        {
+                            _lblStatus.Text = $"Todos los {selected.Count} PDF(s) seleccionados ya estaban procesados en BD (cargados en tabla).";
+                            MessageBox.Show(
+                                $"Los {selected.Count} PDF(s) seleccionados ya existen en la tabla '{DatabaseSchemaManager.ResultsTableName}'.\n\n" +
+                                "Sus resultados ya están cargados en la tabla listos para revisar o exportar a CSV.\n" +
+                                "(Si deseas volver a analizarlos con Claude, desmarca 'Omitir ya procesados en BD').",
+                                "Nada pendiente",
+                                MessageBoxButtons.OK,
+                                MessageBoxIcon.Information);
+                            return;
+                        }
+                    }
+                }
+                catch (Exception dbEx)
+                {
+                    Log($"[Aviso MySQL] No se pudo consultar procesados previos: {dbEx.Message}. Se analizarán todos los seleccionados.");
+                }
+            }
+
             _isRunning = true;
             _isPaused = false;
             _pauseEvent.Set();
@@ -750,12 +823,12 @@ namespace CatastroFixer
 
             SetRunningUiState(true);
             _progressBar.Minimum = 0;
-            _progressBar.Maximum = selected.Count;
+            _progressBar.Maximum = pending.Count;
             _progressBar.Value = 0;
 
-            var queue = new ConcurrentQueue<string>(selected);
+            var queue = new ConcurrentQueue<string>(pending);
             int completed = 0;
-            int total = selected.Count;
+            int total = pending.Count;
             var swBatch = Stopwatch.StartNew();
 
             Log($"=== Iniciando análisis de {total} PDF(s) con {_config.MaxConcurrency} hilo(s) | Modelo: {_config.ClaudeModel} ===");
@@ -929,9 +1002,48 @@ namespace CatastroFixer
             _treePdfs.Enabled = !running;
             _btnToggleSelectAll.Enabled = !running;
             _btnToggleExpand.Enabled = !running;
+            _chkSkipProcessedDb.Enabled = !running;
             _btnPause.Enabled = running;
             _btnCancel.Enabled = running;
             _btnPause.Text = "⏸ Pausar";
+        }
+
+        private void AddResultRowImmediate(DetectionResult res)
+        {
+            if (IsDisposed || res == null) return;
+            _results.Add(res);
+
+            int rowIdx = _dgvResults.Rows.Add(
+                res.FileName,
+                res.MunicipioNombre ?? "",
+                res.MunicipioClave ?? "",
+                res.LocalidadNombre ?? "",
+                res.LocalidadId?.ToString() ?? "",
+                res.LocalidadClave ?? "",
+                res.UbicacionExtraida ?? "",
+                res.Estado ?? "",
+                res.DestinoPropuesto ?? "",
+                res.Evidencia ?? "",
+                res.FilePath ?? ""
+            );
+
+            var row = _dgvResults.Rows[rowIdx];
+            if (res.Estado == "Detectado")
+            {
+                row.DefaultCellStyle.BackColor = Color.FromArgb(220, 252, 231);
+            }
+            else if (res.Estado == "Detectado (Fallback)")
+            {
+                row.DefaultCellStyle.BackColor = Color.FromArgb(254, 249, 195);
+            }
+            else if (res.Estado != null && res.Estado.StartsWith("Fallback Total", StringComparison.OrdinalIgnoreCase))
+            {
+                row.DefaultCellStyle.BackColor = Color.FromArgb(255, 237, 213);
+            }
+            else
+            {
+                row.DefaultCellStyle.BackColor = Color.FromArgb(254, 226, 226);
+            }
         }
 
         private void AddResultRowThreadSafe(DetectionResult res, int done, int total, double elapsedSec)
@@ -940,39 +1052,7 @@ namespace CatastroFixer
             BeginInvoke(new Action(() =>
             {
                 if (IsDisposed) return;
-                _results.Add(res);
-
-                int rowIdx = _dgvResults.Rows.Add(
-                    res.FileName,
-                    res.MunicipioNombre ?? "",
-                    res.MunicipioClave ?? "",
-                    res.LocalidadNombre ?? "",
-                    res.LocalidadId?.ToString() ?? "",
-                    res.LocalidadClave ?? "",
-                    res.UbicacionExtraida ?? "",
-                    res.Estado ?? "",
-                    res.DestinoPropuesto ?? "",
-                    res.Evidencia ?? "",
-                    res.FilePath ?? ""
-                );
-
-                var row = _dgvResults.Rows[rowIdx];
-                if (res.Estado == "Detectado")
-                {
-                    row.DefaultCellStyle.BackColor = Color.FromArgb(220, 252, 231);
-                }
-                else if (res.Estado == "Detectado (Fallback)")
-                {
-                    row.DefaultCellStyle.BackColor = Color.FromArgb(254, 249, 195);
-                }
-                else if (res.Estado != null && res.Estado.StartsWith("Fallback Total", StringComparison.OrdinalIgnoreCase))
-                {
-                    row.DefaultCellStyle.BackColor = Color.FromArgb(255, 237, 213);
-                }
-                else
-                {
-                    row.DefaultCellStyle.BackColor = Color.FromArgb(254, 226, 226);
-                }
+                AddResultRowImmediate(res);
 
                 _progressBar.Value = Math.Min(_progressBar.Maximum, done);
                 double avgSec = done > 0 ? elapsedSec / done : 0;
