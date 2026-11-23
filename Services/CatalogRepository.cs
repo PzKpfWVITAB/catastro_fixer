@@ -150,6 +150,13 @@ namespace CatastroFixer.Services
                    ?? list.First();
         }
 
+        public Municipio GetDefaultFallbackMunicipio()
+        {
+            return Municipios.FirstOrDefault(m => m.ClaveFormateada == "101")
+                   ?? Municipios.FirstOrDefault(m => m.Nombre != null && m.Nombre.IndexOf("TUXTLA GUTI", StringComparison.OrdinalIgnoreCase) >= 0)
+                   ?? Municipios.FirstOrDefault(m => m.Id == 100);
+        }
+
         public Municipio ResolveMunicipio(long? suggestedId, string rawText)
         {
             if (suggestedId.HasValue && _municipiosById.TryGetValue(suggestedId.Value, out var direct))

@@ -21,6 +21,7 @@ namespace CatastroFixer.Services
         public int MaxConcurrency { get; set; } = 4;
         public int MaxPages { get; set; } = 3;
         public string DefaultPdfDir { get; set; } = @"\\172.40.5.84\ssdirec\REVISANDO CATASTRO\ENTREGA 3\2DA PARTE\CATASTRO SIN CLAVE\001";
+        public string DestinoBaseDir { get; set; } = "";
 
         public string BuildConnectionString()
         {
@@ -94,6 +95,9 @@ namespace CatastroFixer.Services
             if (map.TryGetValue("DEFAULT_PDF_DIR", out string defDir))
                 cfg.DefaultPdfDir = defDir.Trim();
 
+            if (map.TryGetValue("DESTINO_BASE_DIR", out string destDir))
+                cfg.DestinoBaseDir = destDir.Trim();
+
             return cfg;
         }
 
@@ -120,7 +124,8 @@ namespace CatastroFixer.Services
                 "# Procesamiento",
                 $"MAX_CONCURRENCY={MaxConcurrency}",
                 $"MAX_PAGES={MaxPages}",
-                $"DEFAULT_PDF_DIR={DefaultPdfDir}"
+                $"DEFAULT_PDF_DIR={DefaultPdfDir}",
+                $"DESTINO_BASE_DIR={DestinoBaseDir}"
             };
 
             File.WriteAllLines(EnvFilePath, lines, new UTF8Encoding(false));

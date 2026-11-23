@@ -296,6 +296,7 @@ namespace CatastroFixer
             _dgvResults.Columns.Add("ClaveLoc", "Clave Loc");
             _dgvResults.Columns.Add("Ubicacion", "Ubicación Extraída");
             _dgvResults.Columns.Add("Estado", "Estado");
+            _dgvResults.Columns.Add("DestinoPropuesto", "Destino Propuesto");
             _dgvResults.Columns.Add("Evidencia", "Evidencia");
             var colPath = new DataGridViewTextBoxColumn { Name = "Ruta", HeaderText = "Ruta", Visible = false };
             _dgvResults.Columns.Add(colPath);
@@ -618,6 +619,19 @@ namespace CatastroFixer
 
                         Interlocked.Exchange(ref _consecutiveClaudeFailures, 0);
 
+                        try
+                        {
+                            await DatabaseSchemaManager.UpsertResultAsync(_config, res, _cts.Token);
+                        }
+                        catch (OperationCanceledException)
+                        {
+                            break;
+                        }
+                        catch (Exception dbEx)
+                        {
+                            Log($"[Aviso MySQL] No se pudo guardar '{res.FileName}' en {DatabaseSchemaManager.ResultsTableName}: {dbEx.Message} (Usa 'Crear / Actualizar Tablas BD' en Configurar)");
+                        }
+
                         int done = Interlocked.Increment(ref completed);
                         AddResultRowThreadSafe(res, done, total, swBatch.Elapsed.TotalSeconds);
                     }
@@ -743,6 +757,7 @@ namespace CatastroFixer
                     res.LocalidadClave ?? "",
                     res.UbicacionExtraida ?? "",
                     res.Estado ?? "",
+                    res.DestinoPropuesto ?? "",
                     res.Evidencia ?? "",
                     res.FilePath ?? ""
                 );
@@ -755,6 +770,10 @@ namespace CatastroFixer
                 else if (res.Estado == "Detectado (Fallback)")
                 {
                     row.DefaultCellStyle.BackColor = Color.FromArgb(254, 249, 195);
+                }
+                else if (res.Estado != null && res.Estado.StartsWith("Fallback Total", StringComparison.OrdinalIgnoreCase))
+                {
+                    row.DefaultCellStyle.BackColor = Color.FromArgb(255, 237, 213);
                 }
                 else
                 {
@@ -810,15 +829,21 @@ namespace CatastroFixer
                     var sb = new StringBuilder();
                     sb.Append(string.Join(sep, new[]
                     {
-                        "Archivo", "Municipio", "ClaveMuni", "MunicipioId",
-                        "Localidad", "IdLocalidad", "ClaveLoc", "UbicacionExtraida",
-                        "Estado", "Evidencia", "Ruta"
+                        "NombreOriginal", "UbicacionOriginal", "CarpetaMuniOriginal",
+                        "NombrePropuesto", "DestinoPropuesto",
+                        "Municipio", "ClaveMuni", "MunicipioId",
+                        "Localidad", "IdLocalidad", "ClaveLoc",
+                        "UbicacionExtraida", "Estado", "Evidencia"
                     })).Append("\r\n");
 
                     foreach (var r in _results)
                     {
                         sb.Append(string.Join(sep,
                             Csv(r.FileName),
+                            Csv(r.FilePath),
+                            Csv(r.CarpetaMunicipioOriginal),
+                            Csv(r.NombrePropuesto),
+                            Csv(r.DestinoPropuesto),
                             Csv(r.MunicipioNombre),
                             Csv(r.MunicipioClave),
                             Csv(r.MunicipioId?.ToString()),
@@ -827,8 +852,7 @@ namespace CatastroFixer
                             Csv(r.LocalidadClave),
                             Csv(r.UbicacionExtraida),
                             Csv(r.Estado),
-                            Csv(r.Evidencia),
-                            Csv(r.FilePath))).Append("\r\n");
+                            Csv(r.Evidencia))).Append("\r\n");
                     }
 
                     // UTF-8 con BOM (EF BB BF): garantiza que Excel abra tildes, ñ y rutas intactas al doble clic

@@ -62,11 +62,15 @@ namespace CatastroFixer.Services
         {
             var sw = Stopwatch.StartNew();
             string fileName = Path.GetFileName(pdfPath);
+            string parentDirName = Path.GetFileName(Path.GetDirectoryName(pdfPath) ?? "") ?? "";
             var result = new DetectionResult
             {
                 FilePath = pdfPath,
                 FileName = fileName,
-                Estado = "Sin Municipio"
+                CarpetaMunicipioOriginal = parentDirName,
+                NombrePropuesto = fileName,
+                ModeloClaude = _config.ClaudeModel,
+                Estado = "Fallback Total (101/0001)"
             };
 
             string fileToOpen = pdfPath;
@@ -173,10 +177,41 @@ namespace CatastroFixer.Services
 
                 if (winningMuni == null)
                 {
-                    result.Estado = "Sin Municipio";
+                    // Fallback total obligatorio: Tuxtla Gutiérrez (101) / Localidad 0001
+                    var fallbackMuni = _catalogs.GetDefaultFallbackMunicipio();
+                    if (fallbackMuni != null)
+                    {
+                        result.MunicipioId = fallbackMuni.Id;
+                        result.MunicipioNombre = fallbackMuni.Nombre + " (Fallback)";
+                        result.MunicipioClave = fallbackMuni.ClaveFormateada;
+                        var cab101 = _catalogs.GetCabeceraMunicipal(fallbackMuni.Id);
+                        if (cab101 != null)
+                        {
+                            result.LocalidadId = cab101.Id;
+                            result.LocalidadNombre = cab101.Nombre + " (Fallback)";
+                            result.LocalidadClave = cab101.ClaveFormateada;
+                        }
+                        else
+                        {
+                            result.LocalidadNombre = "TUXTLA GUTIÉRREZ (Fallback)";
+                            result.LocalidadClave = "0001";
+                        }
+                    }
+                    else
+                    {
+                        result.MunicipioNombre = "TUXTLA GUTIÉRREZ (Fallback)";
+                        result.MunicipioClave = "101";
+                        result.LocalidadNombre = "TUXTLA GUTIÉRREZ (Fallback)";
+                        result.LocalidadClave = "0001";
+                    }
+
+                    result.IsMunicipioFallback = true;
+                    result.IsLocalidadFallback = true;
+                    result.Estado = "Fallback Total (101/0001)";
+                    result.DestinoPropuesto = ComputeProposedDestination(pdfPath, result.MunicipioClave, result.LocalidadClave, result.NombrePropuesto);
                     result.Evidencia = evidencias.Count > 0
-                        ? string.Join(" ; ", evidencias)
-                        : $"No se detectó municipio en las primeras {result.PagesScanned} páginas.";
+                        ? string.Join(" ; ", evidencias) + " ; Sin municipio válido -> Fallback 101/0001"
+                        : $"No se detectó municipio válido en las primeras {result.PagesScanned} páginas -> Fallback 101/0001.";
                     return result;
                 }
 
@@ -233,6 +268,7 @@ namespace CatastroFixer.Services
                 {
                     evidencias.Add($"Triangulación: {locMotivo}");
                 }
+                result.DestinoPropuesto = ComputeProposedDestination(pdfPath, result.MunicipioClave, result.LocalidadClave, result.NombrePropuesto);
                 result.Evidencia = string.Join(" ; ", evidencias);
 
                 return result;
@@ -644,6 +680,34 @@ Responde ÚNICAMENTE con un objeto JSON válido comenzando con '{{' y terminando
                 if (codec.FormatID == ImageFormat.Jpeg.Guid) return codec;
             }
             return null;
+        }
+
+        private string ComputeProposedDestination(string originalPdfPath, string muniClave, string locClave, string proposedFileName)
+        {
+            string mClave = string.IsNullOrWhiteSpace(muniClave) ? "101" : muniClave.Trim().PadLeft(3, '0');
+            string lClave = string.IsNullOrWhiteSpace(locClave) ? "0001" : locClave.Trim().PadLeft(4, '0');
+            string fileName = string.IsNullOrWhiteSpace(proposedFileName) ? Path.GetFileName(originalPdfPath) : proposedFileName;
+
+            if (!string.IsNullOrWhiteSpace(_config.DestinoBaseDir))
+            {
+                return Path.Combine(_config.DestinoBaseDir.Trim(), mClave, lClave, fileName);
+            }
+
+            string parentDir = Path.GetDirectoryName(originalPdfPath) ?? "";
+            string parentName = Path.GetFileName(parentDir) ?? "";
+
+            // Si el PDF está dentro de una carpeta de municipio de 3 dígitos (ej. ...\CATASTRO SIN CLAVE\001\archivo.pdf),
+            // reemplazar la carpeta de municipio por <muniClave>\<locClave>\archivo.pdf
+            if (parentName.Length == 3 && parentName.All(char.IsDigit))
+            {
+                string grandParent = Path.GetDirectoryName(parentDir);
+                if (!string.IsNullOrWhiteSpace(grandParent))
+                {
+                    return Path.Combine(grandParent, mClave, lClave, fileName);
+                }
+            }
+
+            return Path.Combine(parentDir, mClave, lClave, fileName);
         }
 
         private static bool IsNetworkPath(string path)

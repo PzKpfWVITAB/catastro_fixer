@@ -26,12 +26,17 @@ namespace CatastroFixer.Models
     {
         public string FilePath { get; set; }
         public string FileName { get; set; }
+        public string CarpetaMunicipioOriginal { get; set; }
+        public string NombrePropuesto { get; set; }
+        public string DestinoPropuesto { get; set; }
+
         public int PagesScanned { get; set; }
         public int TotalPages { get; set; }
 
         public long? MunicipioId { get; set; }
         public string MunicipioNombre { get; set; }
         public string MunicipioClave { get; set; }
+        public bool IsMunicipioFallback { get; set; }
 
         public long? LocalidadId { get; set; }
         public string LocalidadNombre { get; set; }
@@ -41,6 +46,7 @@ namespace CatastroFixer.Models
         public string UbicacionExtraida { get; set; }
         public string Evidencia { get; set; }
         public string Estado { get; set; }
+        public string ModeloClaude { get; set; }
         public bool IsClaudeApiError { get; set; }
         public string ErrorDetail { get; set; }
         public long ElapsedMs { get; set; }

@@ -22,7 +22,9 @@ namespace CatastroFixer
         private NumericUpDown _numConcurrency;
         private NumericUpDown _numMaxPages;
         private TextBox _txtDefaultDir;
+        private TextBox _txtDestinoBaseDir;
         private Button _btnTestMySql;
+        private Button _btnSyncSchema;
         private Button _btnTestClaude;
         private Button _btnSave;
         private Button _btnCancel;
@@ -46,7 +48,7 @@ namespace CatastroFixer
         private void InitializeUi()
         {
             Text = "Configuración (.env) — CatastroFixer";
-            Size = new Size(560, 520);
+            Size = new Size(560, 560);
             StartPosition = FormStartPosition.CenterParent;
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false;
@@ -66,9 +68,14 @@ namespace CatastroFixer
             _txtUser = AddTextRow("Usuario:", ref y, 220);
             _txtPassword = AddTextRow("Contraseña:", ref y, 220, isPassword: true);
 
-            _btnTestMySql = new Button { Text = "Probar MySQL", Left = 160, Top = y, Width = 140, Height = 30, BackColor = Color.FromArgb(241, 245, 249), FlatStyle = FlatStyle.Flat };
+            _btnTestMySql = new Button { Text = "Probar MySQL", Left = 160, Top = y, Width = 135, Height = 30, BackColor = Color.FromArgb(241, 245, 249), FlatStyle = FlatStyle.Flat };
             _btnTestMySql.Click += BtnTestMySql_Click;
             Controls.Add(_btnTestMySql);
+
+            _btnSyncSchema = new Button { Text = "Crear / Actualizar Tablas BD", Left = 305, Top = y, Width = 215, Height = 30, BackColor = Color.FromArgb(37, 99, 235), ForeColor = Color.White, FlatStyle = FlatStyle.Flat, Font = new Font("Segoe UI", 9f, FontStyle.Bold) };
+            _btnSyncSchema.FlatAppearance.BorderSize = 0;
+            _btnSyncSchema.Click += BtnSyncSchema_Click;
+            Controls.Add(_btnSyncSchema);
             y += 42;
 
             var lblClaude = new Label { Text = "Anthropic Claude Vision", Font = new Font("Segoe UI", 10f, FontStyle.Bold), ForeColor = Color.FromArgb(30, 58, 138), Left = 20, Top = y, Width = 500 };
@@ -86,6 +93,7 @@ namespace CatastroFixer
             _numConcurrency = AddNumericRow("Hilos concurrentes:", ref y, 1, 32);
             _numMaxPages = AddNumericRow("Máx. páginas/PDF:", ref y, 1, 15);
             _txtDefaultDir = AddTextRow("Carpeta PDF default:", ref y, 360);
+            _txtDestinoBaseDir = AddTextRow("Destino base (opc.):", ref y, 360);
 
             _btnTestClaude = new Button { Text = "Probar Claude", Left = 160, Top = y, Width = 140, Height = 30, BackColor = Color.FromArgb(241, 245, 249), FlatStyle = FlatStyle.Flat };
             _btnTestClaude.Click += BtnTestClaude_Click;
@@ -135,6 +143,7 @@ namespace CatastroFixer
             _numConcurrency.Value = Math.Max(1, Math.Min(32, _config.MaxConcurrency));
             _numMaxPages.Value = Math.Max(1, Math.Min(15, _config.MaxPages));
             _txtDefaultDir.Text = _config.DefaultPdfDir;
+            _txtDestinoBaseDir.Text = _config.DestinoBaseDir;
         }
 
         private void ApplyToConfig(EnvConfig target)
@@ -149,6 +158,7 @@ namespace CatastroFixer
             target.MaxConcurrency = (int)_numConcurrency.Value;
             target.MaxPages = (int)_numMaxPages.Value;
             target.DefaultPdfDir = _txtDefaultDir.Text.Trim();
+            target.DestinoBaseDir = _txtDestinoBaseDir.Text.Trim();
         }
 
         private async void BtnTestMySql_Click(object sender, EventArgs e)
@@ -171,6 +181,28 @@ namespace CatastroFixer
             {
                 _btnTestMySql.Enabled = true;
                 _btnTestMySql.Text = "Probar MySQL";
+            }
+        }
+
+        private async void BtnSyncSchema_Click(object sender, EventArgs e)
+        {
+            _btnSyncSchema.Enabled = false;
+            _btnSyncSchema.Text = "Sincronizando...";
+            try
+            {
+                var temp = new EnvConfig();
+                ApplyToConfig(temp);
+                string summary = await DatabaseSchemaManager.EnsureOrUpdateAllTablesAsync(temp);
+                MessageBox.Show($"Esquema de base de datos sincronizado en '{temp.DbDatabase}':\n\n{summary}", "Tablas BD Actualizadas", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error al crear/actualizar tablas en MySQL:\n\n{ex.Message}", "Error de Esquema BD", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            finally
+            {
+                _btnSyncSchema.Enabled = true;
+                _btnSyncSchema.Text = "Crear / Actualizar Tablas BD";
             }
         }
 
