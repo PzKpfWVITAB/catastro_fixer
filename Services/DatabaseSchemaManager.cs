@@ -278,14 +278,18 @@ WHERE estado <> 'Error' AND estado <> 'Error API Claude';";
 
                 string sql = $@"
 SELECT
-    nombre_archivo_original,
-    ubicacion_original,
-    nombre_propuesto,
-    destino_propuesto,
-    municipio_clave,
-    localidad_clave
-FROM `{ResultsTableName}`
-ORDER BY id ASC;";
+    r.nombre_archivo_original,
+    r.ubicacion_original,
+    r.nombre_propuesto,
+    r.destino_propuesto,
+    r.municipio_clave,
+    COALESCE(m.nombre, REPLACE(r.municipio_nombre, ' (Fallback)', '')) AS municipio_oficial,
+    r.localidad_clave,
+    COALESCE(l.nombre, REPLACE(r.localidad_nombre, ' (Fallback)', '')) AS localidad_oficial
+FROM `{ResultsTableName}` r
+LEFT JOIN stellmunicipios m ON m.id = r.municipio_id
+LEFT JOIN stelllocalidades l ON l.id = r.localidad_id
+ORDER BY r.id ASC;";
 
                 using (var cmd = new MySqlCommand(sql, conn))
                 using (var reader = await cmd.ExecuteReaderAsync(ct))
@@ -299,7 +303,9 @@ ORDER BY id ASC;";
                             NombrePropuesto = reader.IsDBNull(2) ? "" : reader.GetString(2),
                             DestinoPropuesto = reader.IsDBNull(3) ? "" : reader.GetString(3),
                             MunicipioClave = reader.IsDBNull(4) ? "" : reader.GetString(4),
-                            LocalidadClave = reader.IsDBNull(5) ? "" : reader.GetString(5)
+                            MunicipioNombre = reader.IsDBNull(5) ? "" : reader.GetString(5),
+                            LocalidadClave = reader.IsDBNull(6) ? "" : reader.GetString(6),
+                            LocalidadNombre = reader.IsDBNull(7) ? "" : reader.GetString(7)
                         });
                     }
                 }

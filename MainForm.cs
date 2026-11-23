@@ -1122,7 +1122,8 @@ namespace CatastroFixer
                     sb.Append(string.Join(sep, new[]
                     {
                         "NombreArchivo", "Ubicacion", "NombreNuevo", "UbicacionNueva",
-                        "ClaveMunicipioPropuesto", "ClaveLocalidadPropuesta"
+                        "ClaveMunicipioPropuesto", "MunicipioPropuesto",
+                        "ClaveLocalidadPropuesta", "LocalidadPropuesta"
                     })).Append("\r\n");
 
                     foreach (var r in dbResults)
@@ -1133,7 +1134,9 @@ namespace CatastroFixer
                             Csv(r.NombrePropuesto),
                             Csv(r.DestinoPropuesto),
                             Csv(r.MunicipioClave),
-                            Csv(r.LocalidadClave))).Append("\r\n");
+                            Csv(r.MunicipioNombre),
+                            Csv(r.LocalidadClave),
+                            Csv(r.LocalidadNombre))).Append("\r\n");
                     }
 
                     // UTF-8 con BOM (EF BB BF): garantiza que Excel abra tildes, ñ y rutas intactas al doble clic
