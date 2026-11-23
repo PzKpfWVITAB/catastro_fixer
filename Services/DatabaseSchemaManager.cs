@@ -263,6 +263,51 @@ WHERE estado <> 'Error' AND estado <> 'Error API Claude';";
             return map;
         }
 
+        public static async Task<List<DetectionResult>> LoadAllResultsForExportAsync(EnvConfig config, CancellationToken ct = default)
+        {
+            var list = new List<DetectionResult>();
+
+            using (var conn = new MySqlConnection(config.BuildConnectionString()))
+            {
+                await conn.OpenAsync(ct);
+
+                if (!await TableExistsAsync(conn, config.DbDatabase, ResultsTableName, ct))
+                {
+                    return list;
+                }
+
+                string sql = $@"
+SELECT
+    nombre_archivo_original,
+    ubicacion_original,
+    nombre_propuesto,
+    destino_propuesto,
+    municipio_clave,
+    localidad_clave
+FROM `{ResultsTableName}`
+ORDER BY id ASC;";
+
+                using (var cmd = new MySqlCommand(sql, conn))
+                using (var reader = await cmd.ExecuteReaderAsync(ct))
+                {
+                    while (await reader.ReadAsync(ct))
+                    {
+                        list.Add(new DetectionResult
+                        {
+                            FileName = reader.IsDBNull(0) ? "" : reader.GetString(0),
+                            FilePath = reader.IsDBNull(1) ? "" : reader.GetString(1),
+                            NombrePropuesto = reader.IsDBNull(2) ? "" : reader.GetString(2),
+                            DestinoPropuesto = reader.IsDBNull(3) ? "" : reader.GetString(3),
+                            MunicipioClave = reader.IsDBNull(4) ? "" : reader.GetString(4),
+                            LocalidadClave = reader.IsDBNull(5) ? "" : reader.GetString(5)
+                        });
+                    }
+                }
+            }
+
+            return list;
+        }
+
         public static async Task UpsertResultAsync(EnvConfig config, DetectionResult r, CancellationToken ct = default)
         {
             if (r == null || string.IsNullOrWhiteSpace(r.FilePath)) return;

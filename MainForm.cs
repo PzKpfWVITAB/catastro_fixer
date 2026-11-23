@@ -1080,11 +1080,29 @@ namespace CatastroFixer
             }
         }
 
-        private void BtnExportCsv_Click(object sender, EventArgs e)
+        private async void BtnExportCsv_Click(object sender, EventArgs e)
         {
-            if (_results.Count == 0)
+            _btnExportCsv.Enabled = false;
+            List<DetectionResult> dbResults;
+            try
             {
-                MessageBox.Show("No hay resultados para exportar todavía.", "Exportar CSV", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                Cursor = Cursors.WaitCursor;
+                dbResults = await DatabaseSchemaManager.LoadAllResultsForExportAsync(_config);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error al consultar la base de datos ({DatabaseSchemaManager.ResultsTableName}):\n{ex.Message}", "Error MySQL", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+            finally
+            {
+                Cursor = Cursors.Default;
+                _btnExportCsv.Enabled = true;
+            }
+
+            if (dbResults.Count == 0)
+            {
+                MessageBox.Show($"No hay registros guardados en la tabla '{DatabaseSchemaManager.ResultsTableName}' para exportar.", "Exportar CSV", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 return;
             }
 
@@ -1107,7 +1125,7 @@ namespace CatastroFixer
                         "ClaveMunicipioPropuesto", "ClaveLocalidadPropuesta"
                     })).Append("\r\n");
 
-                    foreach (var r in _results)
+                    foreach (var r in dbResults)
                     {
                         sb.Append(string.Join(sep,
                             Csv(r.FileName),
@@ -1120,7 +1138,8 @@ namespace CatastroFixer
 
                     // UTF-8 con BOM (EF BB BF): garantiza que Excel abra tildes, ñ y rutas intactas al doble clic
                     File.WriteAllText(dlg.FileName, sb.ToString(), new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
-                    MessageBox.Show($"CSV exportado correctamente en UTF-8 con BOM ({_results.Count} filas):\n{dlg.FileName}", "Exportado", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    Log($"[Exportar CSV] Exportados {dbResults.Count} registro(s) desde MySQL ({DatabaseSchemaManager.ResultsTableName}) a: {dlg.FileName}");
+                    MessageBox.Show($"CSV exportado correctamente desde MySQL en UTF-8 con BOM ({dbResults.Count} filas):\n{dlg.FileName}", "Exportado", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 }
                 catch (Exception ex)
                 {
